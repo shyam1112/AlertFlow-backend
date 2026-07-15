@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Secrets — NEVER commit
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+
+# Logs
+logs/
+log/
+*.log
+
+# Generated reports & temp Excel files
+reports/
+data/
+*.xlsx
+*.ods
+
+# PM2 runtime files
+.pm2/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+nbproject/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build output (if babel compile step is added)
+dist/
+build/
