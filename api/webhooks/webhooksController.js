@@ -5,8 +5,9 @@ import logger from '../../common/logger';
 import { evaluateProductWebhook } from '../../common/scanEngine';
 import { fetchProduct } from '../../common/shopifyGraphqlService';
 
+// ── Webhook authentication ────────────────────────────────────────────────────
+
 export const authenticateWebhook = (req, res, next) => {
-  res.sendStatus(200);
   try {
     const hmac = req.get('X-Shopify-Hmac-Sha256');
     const hash = crypto
@@ -15,21 +16,26 @@ export const authenticateWebhook = (req, res, next) => {
       .digest('base64');
 
     if (hash === hmac) {
+      // Respond 200 immediately (Shopify requires a fast ack), then process async
+      res.sendStatus(200);
       req.body = JSON.parse(req.body.toString());
       next();
     } else {
-      logger.info('Danger! Not from Shopify!', {
+      logger.info('Webhook HMAC validation failed — not from Shopify', {
         shopName: req.get('X-Shopify-Shop-Domain'),
       });
+      res.sendStatus(401);
     }
   } catch (error) {
-    logger.error(`Error in authenticating webhook ${error.message}`, {
+    logger.error(`Error authenticating webhook: ${error.message}`, {
       shopName: req.get('X-Shopify-Shop-Domain'),
-      header: JSON.stringify(req.headers),
       stack: error.stack,
     });
+    res.sendStatus(500);
   }
 };
+
+// ── Shop / app webhooks ───────────────────────────────────────────────────────
 
 export const shopUpdate = async (req, res, next) => {
   try {
@@ -39,63 +45,23 @@ export const shopUpdate = async (req, res, next) => {
       { expiresIn: '600000ms' },
       async (jwtErr, token) => {
         if (jwtErr) {
-          logger.error(
-            `Error in generating JWT token for shop update webhook ${jwtErr.message}`,
-            {
-              shopName: req.get('X-Shopify-Shop-Domain'),
-              payload: req.body,
-              stack: jwtErr.stack,
-            },
-          );
+          logger.error(`JWT error in shop/update webhook: ${jwtErr.message}`, { stack: jwtErr.stack });
           return;
         }
-        const jwtHeader = {
-          headers: {
-            authorization: 'Bearer ' + token,
-          },
-        };
-        const shop = await axios
-          .get(`${process.env.HOST}/shops`, jwtHeader)
-          .catch(shopErr => {
-            logger.error(
-              `Error in fetching shop details in shop update webhook ${shopErr.message}`,
-              {
-                shopName: req.get('X-Shopify-Shop-Domain'),
-                payload: req.body,
-                stack: shopErr.stack,
-              },
-            );
-            return;
+        const jwtHeader = { headers: { authorization: 'Bearer ' + token } };
+        const shop = await axios.get(`${process.env.HOST}/shops`, jwtHeader).catch(shopErr => {
+          logger.error(`Error fetching shop in shop/update webhook: ${shopErr.message}`, { stack: shopErr.stack });
+          return null;
+        });
+        if (shop && new Date(shop.data.updated_at).getTime() !== new Date(req.body.updated_at).getTime()) {
+          await axios.put(`${process.env.HOST}/shops`, req.body, jwtHeader).catch(err => {
+            logger.error(`Error updating shop in shop/update webhook: ${err.message}`, { stack: err.stack });
           });
-        if (shop) {
-          if (
-            new Date(shop.data.updated_at).getTime() !==
-            new Date(req.body.updated_at).getTime()
-          ) {
-            await axios
-              .put(`${process.env.HOST}/shops`, req.body, jwtHeader)
-              .catch(shopUpdateErr => {
-                logger.error(
-                  `Error in updating shop data in shop update webhook ${shopUpdateErr.message}`,
-                  {
-                    shopName: req.get('X-Shopify-Shop-Domain'),
-                    payload: req.body,
-                    stack: shopUpdateErr.stack,
-                  },
-                );
-                return;
-              });
-          }
         }
       },
     );
   } catch (error) {
-    logger.error(`Global error in shop update webhook ${error.message}`, {
-      shopName: req.get('X-Shopify-Shop-Domain'),
-      payload: req.body,
-      stack: error.stack,
-    });
-    return;
+    logger.error(`Global error in shop/update webhook: ${error.message}`, { stack: error.stack });
   }
 };
 
@@ -107,58 +73,25 @@ export const appUninstalled = async (req, res, next) => {
       { expiresIn: '600000ms' },
       async (jwtErr, token) => {
         if (jwtErr) {
-          logger.error(
-            `Error in generating JWT token for app uninstall webhook ${jwtErr.message}`,
-            {
-              shopName: req.get('X-Shopify-Shop-Domain'),
-              payload: req.body,
-              stack: jwtErr.stack,
-            },
-          );
+          logger.error(`JWT error in app/uninstalled webhook: ${jwtErr.message}`, { stack: jwtErr.stack });
           return;
         }
-        const jwtHeader = {
-          headers: {
-            authorization: 'Bearer ' + token,
-          },
-        };
-
-        const shopSecretData = {
-          chargeStatus: 'uninstalled',
-        };
-
+        const jwtHeader = { headers: { authorization: 'Bearer ' + token } };
         await Promise.all([
           axios.delete(`${process.env.HOST}/shops`, jwtHeader),
           axios.delete(`${process.env.HOST}/settings`, jwtHeader),
-          axios.put(
-            `${process.env.HOST}/shop-secrets`,
-            shopSecretData,
-            jwtHeader,
-          ),
-        ]).catch(promiseErr => {
-          logger.error(
-            `Error in deleting shop data and updating charge status in app uninstall webhook ${promiseErr.message}`,
-            {
-              shopName: req.get('X-Shopify-Shop-Domain'),
-              payload: req.body,
-              stack: promiseErr.stack,
-            },
-          );
-          return;
+          axios.put(`${process.env.HOST}/shop-secrets`, { chargeStatus: 'uninstalled' }, jwtHeader),
+        ]).catch(err => {
+          logger.error(`Error cleaning up data in app/uninstalled webhook: ${err.message}`, { stack: err.stack });
         });
       },
     );
   } catch (error) {
-    logger.error(`Global error in app uninstall webhook ${error.message}`, {
-      shopName: req.get('X-Shopify-Shop-Domain'),
-      payload: req.body,
-      stack: error.stack,
-    });
-    return;
+    logger.error(`Global error in app/uninstalled webhook: ${error.message}`, { stack: error.stack });
   }
 };
 
-// ── Product webhooks ─────────────────────────────────────────────────────────
+// ── Product webhooks ──────────────────────────────────────────────────────────
 
 async function handleProductChange(req) {
   const shopName = req.get('X-Shopify-Shop-Domain');
@@ -185,10 +118,9 @@ export const productUpdated = async (req, res, next) => {
 export const productDeleted = async (req, res, next) => {
   const shopName = req.get('X-Shopify-Shop-Domain');
   try {
-    const productId = String(req.body.id);
     const Violations = (await import('../violations/violationsModel')).default;
     await Violations.updateMany(
-      { shopName, product_id: productId, status: 'active' },
+      { shopName, product_id: String(req.body.id), status: 'active' },
       { status: 'resolved', resolved_at: new Date() },
     );
   } catch (error) {
@@ -198,4 +130,48 @@ export const productDeleted = async (req, res, next) => {
 
 export const inventoryLevelUpdated = async (req, res, next) => {
   logger.info(`Inventory level updated for shop: ${req.get('X-Shopify-Shop-Domain')}`);
+};
+
+// ── GDPR Mandatory Webhooks ───────────────────────────────────────────────────
+// Required by Shopify for all apps in the App Store.
+
+export const customersDataRequest = (req, res, next) => {
+  // AlertFlow stores product violation data only — no personal customer PII.
+  // Log the request and acknowledge; nothing to export.
+  logger.info('GDPR customers/data_request received', {
+    shopName: req.get('X-Shopify-Shop-Domain'),
+    payload: req.body,
+  });
+};
+
+export const customersRedact = (req, res, next) => {
+  // AlertFlow stores no personal customer data — acknowledge the redaction request.
+  logger.info('GDPR customers/redact received', {
+    shopName: req.get('X-Shopify-Shop-Domain'),
+    payload: req.body,
+  });
+};
+
+export const shopRedact = async (req, res, next) => {
+  // Shopify sends this 48 hours after a shop uninstalls.
+  // Delete all shop data: rules, violations, scan logs, settings.
+  const shopName = req.get('X-Shopify-Shop-Domain');
+  logger.info(`GDPR shop/redact received for ${shopName}`);
+  try {
+    const [Rules, Violations, ScanLog, Settings] = await Promise.all([
+      import('../rules/rulesModel').then(m => m.default),
+      import('../violations/violationsModel').then(m => m.default),
+      import('../scan/scanLogModel').then(m => m.default),
+      import('../settings/settingsModel').then(m => m.default),
+    ]);
+    await Promise.all([
+      Rules.deleteMany({ shopName }),
+      Violations.deleteMany({ shopName }),
+      ScanLog.deleteMany({ shopName }),
+      Settings.deleteMany({ shopName }),
+    ]);
+    logger.info(`GDPR shop/redact: deleted all AlertFlow data for ${shopName}`);
+  } catch (error) {
+    logger.error(`GDPR shop/redact error for ${shopName}: ${error.message}`, { stack: error.stack });
+  }
 };

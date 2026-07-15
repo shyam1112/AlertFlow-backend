@@ -203,6 +203,10 @@ export const initCallback = (req, res, next) => {
                         'products/update',
                         'products/delete',
                         'inventory_levels/update',
+                        // GDPR mandatory webhooks
+                        'customers/data_request',
+                        'customers/redact',
+                        'shop/redact',
                       ];
                       const webhookUrl = topic =>
                         `${process.env.HOST}/webhooks/${topic}`;
