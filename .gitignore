@@ -8,8 +8,9 @@ node_modules/
 .env.production
 .env.staging
 
-# Logs
-logs/
+# Logs — keep the folder but ignore log files inside it
+logs/*
+!logs/.gitkeep
 log/
 *.log
 
