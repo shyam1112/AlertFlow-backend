@@ -18,9 +18,9 @@ module.exports = {
       // Restart delay on crash (ms)
       restart_delay: 3000,
 
-      // PM2 log files — directory must exist on the server
-      out_file: './logs/pm2-out.log',
-      error_file: './logs/pm2-error.log',
+      // Absolute log paths so they work regardless of where PM2 is invoked from
+      out_file: __dirname + '/logs/pm2-out.log',
+      error_file: __dirname + '/logs/pm2-error.log',
       merge_logs: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
 
