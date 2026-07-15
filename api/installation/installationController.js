@@ -93,22 +93,14 @@ export const initCallback = (req, res, next) => {
                 },
               };
 
-              const shopDetails = await axios
+              // Always complete the OAuth flow and save a fresh token —
+              // never reuse a stored token as it may be expired or non-expiring format.
+              const isReinstall = await axios
                 .get(`${process.env.LOCAL_HOST}/shops`, jwtHeaders)
-                .catch(() => null);
-              // Check if shopSecrets also exists — if not, treat as fresh install
-              // so the token gets saved even when the shop record already exists
-              const shopSecretCheck = await axios
-                .get(`${process.env.LOCAL_HOST}/shop-secrets`, jwtHeaders)
-                .catch(() => null);
-              const hasToken = shopSecretCheck?.data?.permanentToken;
+                .then(() => true)
+                .catch(() => false);
 
-              if (shopDetails && shopDetails.data && hasToken) {
-                res.redirect(
-                  301,
-                  `${process.env.REACT_APP_URL}/?fresh_install=0&token=${token}`,
-                );
-              } else {
+              {
                 const accessTokenRequestUri = `https://${shop}/admin/oauth/access_token`;
                 const accessTokenPayload = {
                   client_id: process.env.SHOPIFY_API_KEY,
@@ -233,7 +225,7 @@ export const initCallback = (req, res, next) => {
 
                       res.redirect(
                         301,
-                        `${process.env.REACT_APP_URL}/?fresh_install=1&token=${token}`,
+                        `${process.env.REACT_APP_URL}/?fresh_install=${isReinstall ? 0 : 1}&token=${token}`,
                       );
                     }
                   } catch (mainErr) {
