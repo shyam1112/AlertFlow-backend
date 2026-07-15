@@ -95,17 +95,7 @@ export const initCallback = (req, res, next) => {
 
               const shopDetails = await axios
                 .get(`${process.env.LOCAL_HOST}/shops`, jwtHeaders)
-                .catch(shopErr => {
-                  logger.error(
-                    `Error in fetching shop for installation ${shopErr.message}`,
-                    {
-                      shopName: shop,
-                      header: JSON.stringify(req.headers),
-                      stack: shopErr.stack,
-                    },
-                  );
-                  throw shopErr;
-                });
+                .catch(() => null);
               // Check if shopSecrets also exists — if not, treat as fresh install
               // so the token gets saved even when the shop record already exists
               const shopSecretCheck = await axios
