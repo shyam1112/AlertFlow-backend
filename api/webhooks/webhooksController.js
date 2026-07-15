@@ -66,28 +66,30 @@ export const shopUpdate = async (req, res, next) => {
 };
 
 export const appUninstalled = async (req, res, next) => {
+  const shopName = req.get('X-Shopify-Shop-Domain');
+  logger.info(`App uninstalled for shop: ${shopName} — deleting all data`);
   try {
-    jwt.sign(
-      { shopName: req.get('X-Shopify-Shop-Domain') },
-      process.env.JWT_SECRET,
-      { expiresIn: '600000ms' },
-      async (jwtErr, token) => {
-        if (jwtErr) {
-          logger.error(`JWT error in app/uninstalled webhook: ${jwtErr.message}`, { stack: jwtErr.stack });
-          return;
-        }
-        const jwtHeader = { headers: { authorization: 'Bearer ' + token } };
-        await Promise.all([
-          axios.delete(`${process.env.HOST}/shops`, jwtHeader),
-          axios.delete(`${process.env.HOST}/settings`, jwtHeader),
-          axios.put(`${process.env.HOST}/shop-secrets`, { chargeStatus: 'uninstalled' }, jwtHeader),
-        ]).catch(err => {
-          logger.error(`Error cleaning up data in app/uninstalled webhook: ${err.message}`, { stack: err.stack });
-        });
-      },
-    );
+    const [Rules, Violations, ScanLog, Settings, Shop, ShopSecret] = await Promise.all([
+      import('../rules/rulesModel').then(m => m.default),
+      import('../violations/violationsModel').then(m => m.default),
+      import('../scan/scanLogModel').then(m => m.default),
+      import('../settings/settingsModel').then(m => m.default),
+      import('../shops/shopsModel').then(m => m.default),
+      import('../shopSecrets/shopSecretsModel').then(m => m.default),
+    ]);
+
+    await Promise.all([
+      Rules.deleteMany({ shopName }),
+      Violations.deleteMany({ shopName }),
+      ScanLog.deleteMany({ shopName }),
+      Settings.deleteMany({ shopName }),
+      Shop.deleteMany({ shopName }),
+      ShopSecret.findOneAndUpdate({ shopName }, { chargeStatus: 'uninstalled' }),
+    ]);
+
+    logger.info(`All data deleted for uninstalled shop: ${shopName}`);
   } catch (error) {
-    logger.error(`Global error in app/uninstalled webhook: ${error.message}`, { stack: error.stack });
+    logger.error(`Error deleting data for uninstalled shop ${shopName}: ${error.message}`, { stack: error.stack });
   }
 };
 
