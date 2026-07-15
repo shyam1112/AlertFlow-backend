@@ -33,6 +33,11 @@ app.use(
 
 appMiddleware(app);
 
+// Health check — no auth required
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', app: 'AlertFlow', timestamp: new Date().toISOString() });
+});
+
 // Routes without authentication
 app.use('/init', installationRoutes);
 app.use('/discounts', DiscountsRoutes);
