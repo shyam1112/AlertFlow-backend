@@ -131,37 +131,50 @@ export const initCallback = (req, res, next) => {
                     },
                   };
                   try {
-                    const shopRes = await axios
-                      .get(`https://${shop}/admin/shop.json`, shopifyHeaders)
-                      .catch(shopifyShopErr => {
-                        logger.error(
-                          `Error in fetching shop.json form shopify for installation ${shopifyShopErr.message}`,
-                          {
-                            shopName: shop,
-                            header: JSON.stringify(req.headers),
-                            stack: shopifyShopErr.stack,
-                          },
-                        );
-                        throw shopifyShopErr;
+                    // Try to get full shop details; continue with minimal data if it fails
+                    let shopApiData = null;
+                    try {
+                      const shopRes = await axios.get(
+                        `https://${shop}/admin/api/${process.env.SHOPIFY_API_VERSION}/shop.json`,
+                        shopifyHeaders,
+                      );
+                      if (shopRes && shopRes.data && shopRes.data.shop) {
+                        shopApiData = shopRes.data.shop;
+                      }
+                    } catch (shopifyShopErr) {
+                      const errData = shopifyShopErr.response && shopifyShopErr.response.data;
+                      console.log('shop.json error status:', shopifyShopErr.response && shopifyShopErr.response.status);
+                      console.log('shop.json error data:', JSON.stringify(errData));
+                      logger.error(`shop.json failed during install for ${shop}: ${shopifyShopErr.message}`, {
+                        status: shopifyShopErr.response && shopifyShopErr.response.status,
+                        shopifyError: JSON.stringify(errData),
+                        accessTokenPrefix: accessToken ? accessToken.substring(0, 10) : 'none',
                       });
+                      // Continue with minimal data — owner can update settings in-app
+                    }
 
-                    if (shopRes && shopRes.data) {
+                    {
                       const shopSecretData = {
                         shopName: shop,
                         permanentToken: accessToken,
                       };
                       const settingsData = {
-                        communicationName: shopRes.data.shop.shop_owner || null,
-                        communicationEmailId: shopRes.data.shop.email || null,
-                        dashboardLanguage:
-                          shopRes.data.shop.primary_locale || 'en',
+                        communicationName: (shopApiData && shopApiData.shop_owner) || null,
+                        communicationEmailId: (shopApiData && shopApiData.email) || null,
+                        dashboardLanguage: (shopApiData && shopApiData.primary_locale) || 'en',
+                      };
+                      const shopDbData = shopApiData || {
+                        myshopify_domain: shop,
+                        domain: shop,
+                        name: shop.replace('.myshopify.com', ''),
+                        shopName: shop,
                       };
 
                       await axios
                         .all([
                           axios.post(
                             `${process.env.HOST}/shops`,
-                            shopRes.data.shop,
+                            shopDbData,
                             jwtHeaders,
                           ),
                           axios.post(
